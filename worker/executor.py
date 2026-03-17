@@ -195,6 +195,21 @@ def _run_native_windows(accession: str) -> tuple[bool, int, str, dict | None]:
             _timings["download"] = int(time.time() - _t)
             log.write(f"  Download time: {_timings['download']}s\n")
 
+            # Step 1.5: Subsample before QC (avoid processing entire file)
+            log.write(f"  Subsampling to {SUBSAMPLE_READS} reads per mate before QC...\n")
+            log.flush()
+            if paired:
+                r1_fq = work / f"{accession}_1.fastq"
+                r2_fq = work / f"{accession}_2.fastq"
+                _subsample_gz(r1, r1_fq, SUBSAMPLE_READS)
+                _subsample_gz(r2, r2_fq, SUBSAMPLE_READS)
+                r1, r2 = r1_fq, r2_fq
+            else:
+                se_fq = work / f"{accession}.fastq"
+                _subsample_gz(se, se_fq, SUBSAMPLE_READS * 2)
+                se = se_fq
+            log.write(f"  Subsample done.\n")
+
             # Step 2: QC
             _t = time.time()
             trimmed = work / f"{accession}_trimmed.fastq"
@@ -441,6 +456,18 @@ def _download_from_ena(accession: str, work: Path, log) -> tuple[Path, Path, Pat
     layout = "paired-end" if paired else "single-end"
     log.write(f"  Layout: {layout}\n")
     return r1, r2, se, paired
+
+
+def _subsample_gz(gz_path: Path, out_path: Path, max_reads: int):
+    """Decompress .gz and keep only the first max_reads FASTQ records."""
+    import gzip
+    max_lines = max_reads * 4
+    with gzip.open(gz_path, "rt") as gi, open(out_path, "w") as fo:
+        for i, line in enumerate(gi):
+            if i >= max_lines:
+                break
+            fo.write(line)
+    gz_path.unlink()
 
 
 def _head_concat(f1: Path, f2: Path, out: Path, max_lines: int):
